@@ -71,5 +71,21 @@
 
 验收：`mvn test -Dtest=DiseaseIsolationAcceptanceTest`，15 个检查点逐段输出报告，失败即停并给出停点。
 
+## 潮汐窗口排班（aqua-5）
+
+模块包路径 `com.evops.aqua.tide`，在台账之上打通：潮汐表/禁作天气/人员班次/设备登记 → 按海区潮汐生成换水候选 → 叠加天气与班次形成可执行窗口 → 排班绑窗口池塘设备 → 发布后审批改期 → 自动顺延 → 临时关闭通知班组留回执，全程留证。
+
+- 潮汐表（`POST /api/aqua/tide/events`）：按海区逐条登记高潮/低潮事件；requestId 幂等，同海区同时刻同潮型自然键幂等，重复登记返回首次记录。
+- 禁作天气（`/api/aqua/tide/weather-bans`）与人员班次（`/api/aqua/tide/shifts`）：按海区登记禁作时段、按班组登记值勤时段，均 requestId 幂等。
+- 窗口生成（`POST /api/aqua/tide/windows/generate`）：取海区当日高潮事件向前后各推 margin 分钟得候选时段，**剔除与禁作天气重叠的候选、要求班组班次全覆盖**，被排除候选逐条说明原因；同一潮汐事件只生成一个窗口，重复生成不多写。
+- **统一口径（临界时间归属）**：所有时段一律按半开区间 `[start, end)` 判定重叠——端点相接的天气/排班不算冲突；班次覆盖按闭区间——端点相等算覆盖；**窗口归属日 = 窗口开始时间所在自然日**（跨午夜窗口归开始日），窗口查询、排班、通知全部按此口径归属。
+- 排班（`/api/aqua/tide/schedules`）：窗口+池塘+设备，校验窗口开放、池塘海区一致、设备可用；**同一设备同一时间只能服务一口池**（半开区间判定，端点相接允许），同一池塘同一窗口只排一班。
+- 发布与改期：`POST /{id}/publish` 发布；`POST /{id}/reschedule` 改期——**已发布排班必须登记调度审批人与审批意见**，否则拒绝；待发布排班直接改。
+- 自动顺延（`POST /{id}/postpone`）：系统自动挑选同海区下一个设备空闲的开放窗口生成新排班（origin 链接、继承发布态）；**原计划行的时间/池塘/设备一律不变**，仅状态置 POSTPONED；requestId 幂等。
+- 临时关闭（`POST /api/aqua/tide/windows/{id}/close`）：登记关闭人与原因，向窗口内受影响班组逐条发通知；班组签收（`POST /api/aqua/tide/notifications/{id}/ack`）**留回执**（签收人/时间/回执备注）；重复关闭不多发、重复签收不覆盖首次回执。
+- 全程留证：潮汐/天气/班次/设备登记、成窗、排班创建/发布/改期/顺延、关窗、通知、签收均写 `t_tide_change_evidence`（含操作前后快照与幂等请求号），可经 `GET /api/aqua/tide/evidence` 按对象或 requestId 追溯。
+
+验收：`mvn test -Dtest=TideWindowScheduleAcceptanceTest`，11 个检查点逐段输出报告，失败即停并给出停点。
+
 
 
